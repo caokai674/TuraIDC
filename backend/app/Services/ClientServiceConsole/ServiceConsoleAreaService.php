@@ -950,7 +950,9 @@ class ServiceConsoleAreaService
         $css = (string) preg_replace('~(?:expression\s*\([^)]*\)|-moz-binding\s*:[^;}]*)~i', '', $css);
         $css = (string) preg_replace('~\bbehavior\s*:[^;}]*(?:;|})~i', '', $css);
 
-        if (trim($css) === '') {
+        // libxml 对 <style> 内文本按原样输出。正则替换可能拼出 </style> 注入，
+        // 故在所有替换之后拒绝任何含 '<' 的样式块，维持 DOM 白名单边界。
+        if (trim($css) === '' || str_contains($css, '<')) {
             $element->parentNode?->removeChild($element);
 
             return;

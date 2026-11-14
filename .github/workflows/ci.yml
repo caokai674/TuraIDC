@@ -148,6 +148,10 @@ jobs:
       - name: Install dependencies
         run: composer install --no-interaction --prefer-dist --no-progress --no-scripts
 
+      # 真实随机密钥，覆盖 job env 中的全零占位值；否则 UpstreamJwt 会按设计拒绝所有请求。
+      - name: Generate APP key for feature tests
+        run: echo "APP_KEY=base64:$(openssl rand -base64 32 | tr -d '\n')" >> "$GITHUB_ENV"
+
       # 测试库不是空库跑 migrate：本仓的安装基线是 database/schema/mysql-schema.sql，
       # 迁移只叠加增量（docs/develop/testing.md 第 173 行记的就是这套）。
       # 直接对空库 migrate 会因为早期迁移依赖基线表而失败。

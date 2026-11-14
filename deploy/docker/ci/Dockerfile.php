@@ -13,7 +13,7 @@ RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends git unzip default-mysql-client; \
     # pdo_mysql：backend 启动时 AppServiceProvider 会连库探测 settings 表（composer install 的 post-autoload-dump 阶段）
-    docker-php-ext-install pdo_mysql xml; \
+    docker-php-ext-install pdo_mysql; \
     rm -rf /var/lib/apt/lists/*
 
 # composer v2（与 CI tools: composer:v2 对齐）

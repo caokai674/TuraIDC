@@ -481,7 +481,8 @@ final class ServiceConsoleAssetService
             ? (int) $parts['port']
             : ($scheme === 'https' ? 443 : 80);
 
-        if ($port < 1 || $port > 65535) {
+        // parse_url() 已拒绝大于 65535 的端口；显式拦截可被解析的 0 端口。
+        if ($port < 1) {
             throw new BusinessException('资源地址无效', 42200);
         }
         $httpsUpgrade = $expectedScheme === 'http'

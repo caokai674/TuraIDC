@@ -19,7 +19,7 @@ APP_ENV_VAL="$(printenv APP_ENV || true)"
 APP_ENV_VAL="${APP_ENV_VAL:-production}"
 APP_KEY_VAL="$(printenv APP_KEY || true)"
 if [ "$APP_ENV_VAL" = "production" ] && [ -z "$APP_KEY_VAL" ]; then
-  log "错误：生产环境必须显式设置 APP_KEY；为避免重建后更换密钥，拒绝自动生成并退出。"
+  log "错误：生产环境缺少 APP_KEY；请先从仍在运行的旧容器 backend/.env 恢复原 APP_KEY 到 deploy/docker/.env，再升级。已有数据严禁重生成密钥。"
   exit 1
 fi
 
@@ -28,13 +28,18 @@ fi
 APP_KEY_FILE="$BACKEND_DIR/storage/app/app.key"
 mkdir -p "$(dirname "$APP_KEY_FILE")"
 if [ "$APP_ENV_VAL" != "production" ] && [ -z "$APP_KEY_VAL" ] && [ -s "$APP_KEY_FILE" ]; then
-  APP_KEY_VAL="$(cat "$APP_KEY_FILE")"
+  # 旧版持久化文件按 APP_KEY=base64:... 写入；读取时兼容该前缀。
+  APP_KEY_VAL="$(head -n 1 "$APP_KEY_FILE")"
+  APP_KEY_VAL="${APP_KEY_VAL#APP_KEY=}"
 fi
 
 if [ "$APP_ENV_VAL" = "production" ]; then
   case "$APP_KEY_VAL" in
     base64:*)
-      APP_KEY_BYTES="$(printf '%s' "${APP_KEY_VAL#base64:}" | base64 -d 2>/dev/null | wc -c | tr -d ' ')"
+      if ! APP_KEY_BYTES="$(printf '%s' "${APP_KEY_VAL#base64:}" | base64 -d 2>/dev/null | wc -c | tr -d ' ')"; then
+        log "错误：生产 APP_KEY 不是合法的 base64 数据，请检查 deploy/docker/.env。"
+        exit 1
+      fi
       ;;
     *)
       APP_KEY_BYTES="${#APP_KEY_VAL}"
