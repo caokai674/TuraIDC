@@ -218,3 +218,72 @@ jobs:
           CLIENT_CONSOLE_URL: https://console.example.com
           ADMIN_URL: https://admin.example.com
           CLIENT_SESSION_COOKIE_DOMAIN: .example.com
+
+  frontend-e2e:
+    name: Frontend E2E (${{ matrix.app }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # 三端各自一个 job，互不排队：admin 是最大的一套（138 个用例），单独跑约 1.5 分钟。
+    #
+    # 为什么跑构建产物而不是 dev server：dev server 按需编译，多个 worker 同时首屏会互相
+    # 抢编译，5 秒断言随机超时——同一套 admin 用例实测 dev 12.5 分钟且大面积假红，
+    # 换成 vite preview 后 81 秒全绿。这里构建时不注入公开地址（保持相对资源路径），
+    # 与发布镜像用的 build:frontends 是两条独立链路。
+    #
+    # 只跑 desktop：tablet/mobile 两个 project 是同一批用例的响应式复跑，留给夜间全量。
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - app: admin
+            package: turaidc-admin-v3
+          - app: www
+            package: turaidc-user-v3-www
+          - app: console
+            package: turaidc-user-v4-console
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.13.1
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+
+      - name: Install Playwright browsers
+        run: pnpm --filter turaidc-admin-v3 exec playwright install --with-deps chromium
+
+      - name: Build ${{ matrix.app }}
+        run: pnpm --filter ${{ matrix.package }} build
+
+      - name: Run ${{ matrix.app }} E2E
+        env:
+          PW_E2E_PREVIEW: '1'
+          PLAYWRIGHT_WORKERS: '4'
+        run: |
+          pnpm --filter ${{ matrix.package }} exec playwright test \
+            --project=desktop \
+            --retries=1 \
+            --reporter=github
+
+      - name: Upload Playwright artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-${{ matrix.app }}
+          path: frontend-*/test-results
+          if-no-files-found: ignore

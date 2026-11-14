@@ -22,20 +22,28 @@ export default defineConfig({
     // 钉住语言：应用首屏按浏览器偏好自适应，而本套 spec 的断言写的是中文。
     // 不钉的话，宿主语言是英文时页面就渲染英文，整批用例会以「看起来像回归」的形式变红。
     locale: 'zh-CN',
+    // 本机没下载 Playwright 自带 chromium 时，可用 PW_E2E_CHANNEL=chrome 走系统 Chrome
+    channel: process.env.PW_E2E_CHANNEL || undefined,
     baseURL: "http://127.0.0.1:5176",
-    trace: "retain-on-failure",
+    // 预览（CI 门禁）模式只在失败重试时留 trace：常开 trace 会持续抓 DOM 快照，
+    // 重交互用例会被拖到超时。
+    trace: process.env.PW_E2E_PREVIEW === "1" ? "on-first-retry" : "retain-on-failure",
     screenshot: "only-on-failure",
   },
   webServer: {
     // 不用 pnpm run，直接 vite 传参，避免 --port 被吞掉。
+    // PW_E2E_PREVIEW=1 时改跑构建产物：dev server 按需编译在并行 worker 下会互相
+    // 抢编译，导致首屏断言随机超时（CI 门禁因此统一跑 preview，本地开发仍走 dev）。
     command:
-      "pnpm exec vite --host 127.0.0.1 --mode development --port 5176 --strictPort",
+      process.env.PW_E2E_PREVIEW === "1"
+        ? "pnpm exec vite preview --host 127.0.0.1 --port 5176 --strictPort"
+        : "pnpm exec vite --host 127.0.0.1 --mode development --port 5176 --strictPort",
     env: {
       VITE_API_BASE_URL: "http://127.0.0.1:8000/api",
     },
     url: "http://127.0.0.1:5176",
     reuseExistingServer: false,
-    timeout: 120_000,
+    timeout: process.env.PW_E2E_PREVIEW === "1" ? 60_000 : 120_000,
   },
   projects: [
     {

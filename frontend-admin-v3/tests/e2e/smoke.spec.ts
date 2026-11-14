@@ -6014,6 +6014,9 @@ test.describe('frontend-admin-v3 shell smoke', () => {
   });
 
   test('opens user detail deep service and invoice actions', async ({ page }) => {
+    // 这条要跑「详情 → 添加实例 → 实例控制台 → 账单抽屉」四段，负载高时单段就接近默认
+    // 30 秒预算，按 Playwright 的 slow 语义放大三倍（不是给某个断言单独加 timeout）。
+    test.slow();
     await mockAdminInfo(page);
     await mockUserDetail(page);
     await page.addInitScript(() => {
