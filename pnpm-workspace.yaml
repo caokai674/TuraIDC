@@ -10,3 +10,4 @@ allowBuilds:
   '@parcel/watcher': true
   core-js-pure: false
   esbuild: true
+  pnpm: true

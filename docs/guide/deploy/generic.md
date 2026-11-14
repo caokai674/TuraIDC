@@ -1,21 +1,34 @@
 # 部署指南
 
-本文档说明如何将图拉云业务/财务系统部署到生产环境。部署拓扑：后端 API、三个前端静态站点、Redis、MySQL；队列与调度由每分钟一次的 Laravel 调度器统一驱动，无需常驻队列 Worker。
+本文档说明如何将图拉云业务/财务系统部署到生产环境。
 
 ## 1. 环境要求
 
-- 操作系统：Linux（推荐 Ubuntu 22.04+ / Debian 12）或 Windows Server
-- PHP 8.3+，且必须是**已修补 CVE-2026-109618 / CVE-2026-109619 的版本**：上游分支的最低补丁版为 8.3 ≥ 8.3.36 / 8.4 ≥ 8.4.27 / 8.5 ≥ 8.5.12；发行版与 LTS 厂商的回补包同样有效（发行版版本号可能低于上述数字，以厂商公告为准）。无法立刻打补丁时，先把 `session.upload_progress.enabled=0` 写进 php.ini / FPM 池并重启全部 worker，可挡住已知的攻击路径（不是完整修复）
-- MySQL 8.0+（推荐；最低兼容 5.7.8——5.7 已 EOL，仅兼容性支持。混用 8.0 的 mysqldump 客户端备份 5.7 服务端时需加 `--column-statistics=0`。**5.7 部署必须在 my.cnf 的 `[mysqld]` 段设置 `explicit_defaults_for_timestamp=ON`**：5.7 默认 OFF 时，表内首个无显式默认值的 `timestamp` 列会被隐式附加 `ON UPDATE CURRENT_TIMESTAMP`，与 8.0 行为不一致，可能悄悄改写业务时间字段）
-- Redis 6.0+（生产必需：分布式锁、缓存）
+- Linux（推荐 Ubuntu 22.04+ / Debian 12）或 Windows Server
+- PHP 8.3 +
+- MySQL 8.0 +
+- Redis 6.0 +
 - Composer 2.x
-- Node.js 20+（仅构建前端时需要）
+- Node.js 20+（构建前端）
 - Nginx（或任意静态服务器 + 反代）
 
-### 1.1 扩展与禁用函数以代码为准
+> [!WARNING] 警告：对于 PHP 8.3 用户
+> 请使用**已修补 [CVE-2026-109618](https://nvd.nist.gov/vuln/detail/cve-2026-109618) / [CVE-2026-109619](https://nvd.nist.gov/vuln/detail/cve-2026-109619) 的版本**
+>
+> 若无法立刻应用补丁，请将 `session.upload_progress.enabled=0` 写入 php.ini / FPM 池并重启全部 worker，并择日升级PHP
 
-PHP 版本、必需扩展与禁用函数清单的唯一真源是 `backend/app/Support/EnvironmentRequirements.php`，
-本文档不重复维护清单，避免与代码漂移。装完依赖后随时可自查：
+> [!TIP] 注意
+> 该系统最低兼容MySQL 5.7.8。MySQL5.7 已 EOL，仅做兼容性支持。
+>
+> 使用 8.0 的 mysqldump 客户端备份 5.7 服务端时需增加 `--column-statistics=0`。
+>
+> **5.7 部署必须在 my.cnf 的 `mysqld` 段设置 `explicit_defaults_for_timestamp=ON`**
+
+### 扩展与禁用函数
+
+PHP 版本、扩展与禁用函数清单位于 `backend/app/Support/EnvironmentRequirements.php`
+
+本文档不重复维护该清单。装完依赖后可自查：
 
 ```bash
 cd backend
@@ -23,17 +36,15 @@ php artisan app:doctor          # 必选项：版本、必需扩展、禁用函�
 php artisan app:doctor --all    # 附带列出建议安装但不阻断的扩展
 ```
 
-**禁用函数是最高频的部署故障**：宝塔面板默认禁用 `putenv`、`proc_open`、`symlink`，
-会直接导致 `.env` 读取与进程调用失败。解除方式：宝塔 → 软件商店 → PHP → 禁用函数，
-删除这三个函数后重启 PHP，再用 `php artisan app:doctor` 复核。
-
-`app:doctor` 在安装前后都能执行：安装向导的环境检测同样调用这份清单，
-但站点装完之后向导会 404 消失，升级 PHP 或改动 php.ini 后只能靠这个命令复核。
+> [!IMPORTANT] 注意
+> 宝塔面板默认禁用 `putenv`、`proc_open`、`symlink`，导致 `.env` 读取与进程调用失败。
+>
+> 解除方式：宝塔 → 软件商店 → PHP → 禁用函数，删除这三个函数后重启 PHP，再使用 `php artisan app:doctor` 复核。
 
 ## 2. 准备代码
 
 ```bash
-git clone <你的仓库地址> TuraIDC
+git clone https://github.com/25Cloud/TuraIDC TuraIDC
 cd TuraIDC
 ```
 
@@ -48,53 +59,49 @@ cp .env.example .env
 php artisan key:generate
 ```
 
-编辑 `.env`，重点确认：
+编辑 `.env` 并确认如下内容：
 
-```env
+```bash
 APP_ENV=production
 APP_DEBUG=false
+
+# 地址分配
 APP_URL=https://api.example.com
 FRONTEND_URL=https://www.example.com
 CLIENT_CONSOLE_URL=https://console.example.com
 ADMIN_URL=https://admin.example.com
 
+# 数据库配置
 DB_CONNECTION=mysql
 DB_HOST=127.0.0.1
 DB_DATABASE=finance
 DB_USERNAME=finance
 DB_PASSWORD=你的强密码
 
+# Redis配置
 CACHE_STORE=redis
 REDIS_HOST=127.0.0.1
 REDIS_PORT=6379
 REDIS_PASSWORD=
-
-QUEUE_CONNECTION=database
-SESSION_DRIVER=file
-SESSION_SECURE_COOKIE=true
 ```
 
-> 四个 URL（APP_URL / FRONTEND_URL / CLIENT_CONSOLE_URL / ADMIN_URL）必须为互不相同的 HTTPS 域名。前端构建脚本会读取这些地址注入各前端产物。
+> [!IMPORTANT] 注意
+> `地址分配` 建议填入不同的域名，该内容将用于构建前端
 
 ### 3.2 初始化数据库
 
 ```bash
 # 创建数据库
 mysql -u root -p -e "CREATE DATABASE finance CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
-
-# 导入完整结构基线
+# 导入结构
 mysql -u root -p finance < database/schema/mysql-schema.sql
-
-# 执行增量迁移
+# 增量迁移
 php artisan migrate --force
-
-# 写入系统默认配置
+# 写入默认配置
 php artisan db:seed --class=Database\\Seeders\\SettingsSeeder
 ```
 
-> `database/schema/mysql-schema.sql` 是完整结构基线，禁止手工编辑；新功能只新增 `database/migrations/` 增量迁移。
-
-### 3.3 创建管理员账号
+### 3.3 创建超管账号
 
 ```bash
 php artisan tinker
@@ -107,21 +114,21 @@ App\Models\AdminUser::create([
 ]);
 ```
 
-> `role_id` 需为超级管理员角色 id（默认 `super_admin` 角色的记录 id）。可在管理后台继续创建角色与员工账号。
+> [!TIP]
+> 超管创建后，您可在管理后台继续创建其他角色/员工账号。
 
-### 3.4 配置计划任务与队列
+### 3.4 配置计划任务
 
-将以下命令加入系统 crontab（每分钟执行一次 Laravel 调度器）：
+将以下 `cron` 任务加入系统 crontab：
 
-```cron
-* * * * * cd /path/to/TuraIDC/backend && php artisan schedule:run >> /dev/null 2>&1
+```bash
+* * * * * cd /TuraIDC根目录/backend && php artisan schedule:run >> /dev/null 2>&1
 ```
 
-Laravel 调度器内部会按 `routes/console.php` 定义的节奏驱动心跳派发（15 分钟槽位去重）、`queue:drain` 队列消费（按 `provision`、业务组、`automation` 三个队列组分别建 Worker，drain 锁保证同一队列不并发）、存活探针与周期清理。数据库为唯一时钟源，无需单独配置多条 cron。
+> [!CAUTION] 警告：禁止配置多个Cron任务
+> 禁止多次配置常驻 `queue:work`，否则可能形成双消费者；如需排查队列堆积，详见 [部署与调度指南](scheduling.md) 的手动消费命令。
 
-> **不要再配置覆盖同一队列的常驻 `queue:work`**：`schedule:run` 每分钟已经后台触发 `queue:drain` 消费全部队列组，再挂常驻 Worker 会形成双消费者；如需排查队列堆积，见[部署与调度指南](scheduling.md)的手动消费命令。
-
-### 3.5 缓存清理与资源
+### 3.5 缓存清理
 
 ```bash
 php artisan config:cache
@@ -129,37 +136,31 @@ php artisan route:cache
 php artisan event:cache
 ```
 
-> 若 `SESSION_DRIVER` 使用 file，`storage/framework/sessions` 需可写。
-
 ## 4. 前端构建
 
-在仓库根目录执行（需 Node.js 20+ 与 pnpm）：
+在根目录执行：
 
 ```bash
 pnpm install --frozen-lockfile --shamefully-hoist
 pnpm run build:frontends
 ```
 
-该命令读取 `backend/.env` 中的四个公开地址，依次构建三端到各自 `dist/`：
-
 | 前端       | 产物目录                         | 端口（开发） |
 | ---------- | -------------------------------- | ------------ |
-| 官网门户   | `frontend-user-v3-www/dist/`     | 5175         |
+| 官网       | `frontend-user-v3-www/dist/`     | 5175         |
 | 用户控制台 | `frontend-user-v4-console/dist/` | 5173         |
 | 管理后台   | `frontend-admin-v3/dist/`        | 5174         |
 
-三端均为纯静态站点，发布时将各自 `dist/` 内容部署到对应 Nginx 站点即可。
+发布时请将各自 `dist/` 内容部署到对应 Nginx 站点
 
 ## 5. Nginx 配置示例
 
-### 后端 API（api.example.com）
+### 后端
 
 ```nginx
 server {
     listen 443 ssl http2;
     server_name api.example.com;
-
-    # ssl_certificate / ssl_certificate_key ...
 
     root /path/to/TuraIDC/backend/public;
     index index.php;
@@ -179,7 +180,7 @@ server {
 }
 ```
 
-### 前端站点（www.example.com / console.example.com / admin.example.com）
+### 前端
 
 三个前端使用同一套配置模板，替换 `server_name` 与 `root` 即可：
 
@@ -197,32 +198,38 @@ server {
 }
 ```
 
-### 前端站点的 CSP 与点击劫持
+### 前端站点 CSP 与点击劫持
 
-三端 `index.html` 里都有一段 `<meta http-equiv="Content-Security-Policy">`，**它只是兜底**：静态 HTML 写死后端源站、也改不了环境，而且 meta 方式不支持 `frame-ancestors` / `report-uri` / `sandbox`（浏览器会直接忽略并告警）。真正生效的策略应该由 Nginx 响应头下发：更严、改了不用重新构建，还能把 API 源站精确到自己的域名。
+由于前端为静态 HTML，CSP应由 Nginx 执行中间操作。
 
-现成的三套值（含每个域名的理由）在仓库 `deploy/nginx/frontend-csp.conf`，直接复制进对应 `server {}` 即可，策略含义是：
+默认文件位于 `deploy/nginx/frontend-csp.conf`，复制进对应 `server {}` 即可，策略含义是：
 
-| 指令                                                            | 为什么要这么写                                                                                                                                |
-| --------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `script-src 'unsafe-inline'`                                    | 官网、控制台的首屏预热/品牌注入脚本是内联的，管理端 `index.html` 也有内联引导；静态托管没有 nonce 可用。把内联脚本外移到 `/assets` 后可去掉。 |
-| `script-src 'unsafe-eval'`                                      | 三端都用 vue-i18n 在运行时编译语言包（未接 `@intlify/unplugin-vue-i18n` 预编译），去掉后整页抛 `EvalError`。接入预编译后可去掉。              |
-| 极验域名（`static.geetest.com` 等六个 + `monitor.geetest.com`） | 管理与控制台的登录验证码；`gt4.js` 运行期还会用脚本标签加载验证库并埋点，只放 `static` 会在初始化阶段被拦成「网络错误」。                     |
-| `https://res.25y.cn`                                            | 人机验证适配脚本（Corptcha）内部再加载的外网 SDK，由插件配置的 `script_url` 决定。                                                            |
-| `https://tdesign.gtimg.com`                                     | TDesign `t-icon` 默认 `loadDefaultIcons` 的 SVG 雪碧图。                                                                                      |
-| `style-src 'unsafe-inline'`                                     | TDesign / Element Plus 运行时注入样式，首屏 splash 与验证码样式也是内联。                                                                     |
-| `frame-src ... alipays:`                                        | 控制台充值页用隐藏 iframe 拉起支付宝 App。                                                                                                    |
-| `frame-ancestors 'self'`                                        | 只允许同源页面嵌入（`dash.example.com` 之类同域面板）。**这条只能写在响应头里**，meta 里写了无效。                                            |
+| 策略                         | 说明                                                                                                        |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `script-src 'unsafe-inline'` | 官网、控制台的首屏预热/品牌注入脚本和管理端为内联；静态托管时无 nonce 可用。脚本外移至 `/assets` 后可去掉。 |
+| `script-src 'unsafe-eval'`   | 三端使用 vue-i18n 编译语言包（无预编译），去掉后会报错 `EvalError`。接入预编译后可去掉。                    |
+| 极验域名                     | 管理与控制台的登录验证码；`gt4.js` 使用脚本标签加载验证库并埋点，仅放行 `static` 会在初始化阶段被拦截。     |
+| `https://res.25y.cn`         | 人机验证适配脚本（Corptcha）的外网 SDK，由插件配置的 `script_url` 决定。                                    |
+| `https://tdesign.gtimg.com`  | TDesign `t-icon` 默认 `loadDefaultIcons` 的 SVG 雪碧图。                                                    |
+| `style-src 'unsafe-inline'`  | TDesign / Element Plus 运行时注入样式，首屏 splash 与验证码样式也是内联。                                   |
+| `frame-src ... alipays:`     | 控制台充值页用隐藏 iframe 拉起支付宝 App。                                                                  |
+| `frame-ancestors 'self'`     | 只允许同源页面嵌入（`dash.example.com` 等同域面板）。                                                       |
 
-> **nginx 的坑**：`add_header` 不继承。只要某个 `location` 里已经写了 `add_header`（例如静态资源的 `Cache-Control`），就必须在该 `location` 内再贴一遍 CSP，否则这个路径的 `index.html` 会丢掉策略。建议把片段存成 `snippets/frontend-csp-<端>.conf` 再 `include`，避免三处值漂移。
+> [!WARNING] 警告：有关Nginx
+> 在Nginx下，`add_header` 不会继承。
+>
+> 任一 `location` 里的 `add_header`（例如静态资源的 `Cache-Control`），都会导致该路径的`index.html` 无法使用策略，必须在该 `location` 内再贴一遍 CSP
+>
+> 建议存为 `snippets/frontend-csp-<端>.conf` ，然后再使用 `include`，避免出现错误。
 
-**开发态不用手改**：`pnpm run dev` 时 `VITE_API_BASE_URL` 通常是 `http://127.0.0.1:8000/api`（跨源 + http），`shared/vite/apiConnectSrcPlugin.mjs` 会在构建/预览时把该源站补进连接、图片、媒体与 iframe 指令，管理端与控制台还会补进 `script-src`（登录验证码脚本由后端代理到 API 源站）。生产 https 源站本来就被 `https:` 兜住，不会被写进产物。
-
-**自检**：`curl -sI https://console.example.com/ | grep -i content-security-policy` 确认响应头存在；浏览器控制台出现 `Refused to load ...` 就是漏了来源，按上面表格补域名，不要图省事改成 `*` 或 `https:` 通配（`script-src` 尤其不能放开 `https:`，等于允许任意第三方脚本）。
+> [!TIP] 自检
+> 运行 `curl -sI https://console.example.com/ | grep -i content-security-policy` 以确认响应头存在；
+>
+> 若控制台出现 `Refused to load ...` 就是漏了来源，请按照上面的表格修补域名。
 
 ## 6. 进程守护（supervisor）
 
-队列消费由调度器的 `queue:drain` 每分钟驱动，**不需要**常驻队列 Worker；需要进程守护的是 VNC Relay（可选）。
+队列由调度器驱动，**无需**常驻；需要进程守护的是 VNC Relay（可选）。
 
 ### VNC Relay（可选，控制台远程桌面）
 
@@ -237,24 +244,9 @@ autorestart=true
 user=www-data
 ```
 
-也可使用统一入口 `php artisan app:serve --with-schedule` 同时托管 HTTP、VNC Relay、队列与调度，但那是本地/联调入口，生产环境应按上文用 PHP-FPM + cron + supervisor 拆分独立进程。
+也可使用 `php artisan app:serve --with-schedule` 同时托管多个服务，但生产环境应使用 PHP-FPM + cron + supervisor 拆分进程。
 
-## 7. 可选集成配置
-
-以下能力按需在 `backend/.env` 中开启（占位见 `.env.example`）：
-
-| 集成            | 环境变量                                                                           | 说明       |
-| --------------- | ---------------------------------------------------------------------------------- | ---------- |
-| 支付宝          | `ALIPAY_APP_ID` / `ALIPAY_PRIVATE_KEY` / `ALIPAY_PUBLIC_KEY` / `ALIPAY_NOTIFY_URL` | 在线支付   |
-| 短信（阿里云）  | `SMS_API_ENDPOINT`                                                                 | 验证码短信 |
-| 极验            | `GEETEST_CAPTCHA_ID` / `GEETEST_CAPTCHA_KEY` / `GEETEST_ENABLED`                   | 人机验证   |
-| 实名认证（IDC） | `VERIFICATION_KEY` / `VERIFICATION_API_ENDPOINT`                                   | 实名校验   |
-| VNC Relay       | `VNC_RELAY_HOST` / `VNC_RELAY_PORT`                                                | 远程桌面   |
-| Sentry          | `SENTRY_DSN`                                                                       | 错误监控   |
-
-供应商适配（如 `zjmf_finance`）通过管理后台「供应商」模块绑定配置，密钥不写入代码。
-
-## 8. 备份
+## 7. 备份
 
 参考 `backend/scripts/backup_mysql.sh`（每日凌晨备份 MySQL 并保留 14 天）：
 
@@ -268,31 +260,21 @@ bash backend/scripts/backup_mysql.sh
 - `backend/storage/app/private/`（上传文件、票据附件、日志归档）
 - `backend/.env`（应用密钥与配置）
 
-## 9. 上线前检查清单
+## 8. SEO 部署
 
-- [ ] `.env` 中 `APP_DEBUG=false`、`APP_ENV=production`、`SESSION_SECURE_COOKIE=true`
-- [ ] 生产环境 `CACHE_STORE=redis`（分布式锁依赖）
-- [ ] 四个公开域名均为 HTTPS 且互不相同
-- [ ] 数据库已执行全部迁移并初始化默认配置
-- [ ] 已创建超级管理员并修改默认凭据
-- [ ] crontab 已配置 `php artisan schedule:run`
-- [ ] supervisor 已托管队列 Worker
-- [ ] 前端三端产物已部署并刷新缓存
-- [ ] `backend/public/uploads/` 与 `storage` 目录权限正确
+官网是 Vue 单页应用，正文由 `SeoRenderService` 动态渲染注入。
 
-## 10. 官网 SEO 部署
+完整伪静态规则见 [四端 Nginx 伪静态配置](../maintain/nginx-rules.md)，本节只列出各部署形态必须落位的部分与自检方法。
 
-官网是 Vue 单页应用，裸壳 `index.html` 带 `noindex, nofollow`，正文由后端 `SeoRenderService` 读数据库动态渲染后注入。**没接上这条链路，搜索引擎抓到的就是一份带 `noindex` 的空壳，站点等于完全不被收录。** 完整伪静态规则见[四端 Nginx 伪静态配置](../maintain/nginx-rules.md)，本节只列各部署形态必须落位的部分与自检方法。
+### 8.1 三种部署形态
 
-### 10.1 三种部署形态分别要做什么
+| 部署形态        | 转发规则                                                                                       | 前端 shell 地址                                                                                                                                                     |
+| --------------- | ---------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 宝塔 / Nginx    | [四端 Nginx 伪静态配置](../maintain/nginx-rules.md) 第 2 节 / [宝塔部署](bt-panel.md) 4.2 节   | 留空判定为 `file://TuraIDC工作目录/frontend-user-v3-www/dist/index.html`；也可显式填 `SEO_FRONTEND_SHELL_URL=file:///绝对路径/frontend-user-v3-www/dist/index.html` |
+| Docker / 1Panel | 已内置，无需重复配置                                                                           | 默认 `http://frontends:8081/index.html`                                                                                                                             |
+| 裸机部署        | [四端 Nginx 伪静态配置](../maintain/nginx-rules.md) 第 2 节 / [裸机部署](bare-metal.md) 7.2 节 | 同宝塔                                                                                                                                                              | 注意 API 站点强制 HTTPS 的跳转 |
 
-| 部署形态                       | 转发规则放在哪                                                                                                     | 前端 shell 地址                                                                                                                                                       | 注意点                                                                                        |
-| ------------------------------ | ------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| 宝塔面板 / 传统 Nginx 源码部署 | 官网站点「伪静态」照抄[四端 Nginx 伪静态配置](../maintain/nginx-rules.md)第 2 节，见[宝塔部署](bt-panel.md) 4.2 节 | 留空即自动判定为 `file://` 直读同机 `frontend-user-v3-www/dist/index.html`；也可显式填 `SEO_FRONTEND_SHELL_URL=file:///绝对路径/frontend-user-v3-www/dist/index.html` | 内部转发走 `127.0.0.1:80`；API 站点开了强制 HTTPS 时需对本机来源放行，否则回环请求被 301 拦截 |
-| Docker / 1Panel 编排           | 已内置在 `deploy/docker/frontends/nginx-default.conf`，无需重复配置                                                | 默认 `http://frontends:8081/index.html`（compose 内部网络）                                                                                                           | 见[Docker / 1Panel 部署](docker-1panel.md)                                                    |
-| 裸机 systemd 部署              | 照抄[四端 Nginx 伪静态配置](../maintain/nginx-rules.md)第 2 节，见[裸机部署](bare-metal.md) 7.2 节                 | 同宝塔形态，留空自动判定                                                                                                                                              | 同样注意 API 站点强制 HTTPS 的回环跳转                                                        |
-
-### 10.2 环境变量
+### 8.2 环境变量
 
 ```bash
 # 官网公开地址：canonical / sitemap / JSON-LD 都以它为准。
@@ -309,16 +291,7 @@ SEO_SHELL_CACHE_TTL=600
 SEO_CACHE_TTL=300
 ```
 
-### 10.3 哪些路径必须交给后端渲染
-
-- 首页 `/`、`/products`、`/products/{商品ID}`、落地页（`/cloud-server` 等）、`/about`、`/terms`、`/privacy`、`/notices`、`/notices/{id}`、`/help`、`/help/{id}`、`/open-source`
-- `/robots.txt`、`/sitemap.xml`（必须由后端生成真实文本与 XML，不能落到 SPA 静态回退）
-- 其余单段路径转给后端后返回品牌 404 壳 + HTTP 404，避免爬虫把 SPA 裸壳 200 当成可索引页面
-- **多段路径**（商品选购流程 `/products/{slug}/{groupId}/{childGroupId}/{productId}`）保持 SPA 静态回退
-
-> 通配转发有个前提：官网自己的单段路由必须先在 `SeoRenderService::resolvePage()` 里登记，否则会被转成 404 壳。新增官网单段路由时同步在后端登记。
-
-### 10.4 上线后自检
+### 8.3 自检
 
 ```bash
 # 1) robots 与 sitemap 必须是真实内容，不是 SPA 壳
@@ -334,21 +307,8 @@ curl -s -A 'Mozilla/5.0 (compatible; Googlebot/2.1)' https://www.你的域名.co
   | grep -o '"@type":"Product"'
 ```
 
-自检通过后，到百度搜索资源平台提交 `https://www.你的域名.com/sitemap.xml`（站点已带 `msvalidate.01` 验证 meta），并在平台跑一次「抓取诊断」确认实时抓取结果。
-
-### 10.5 常见坑
-
-| 现象                                 | 原因                                                                                   | 处理                                                        |
-| ------------------------------------ | -------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
-| 爬虫抓到空壳，源码里有 `noindex`     | 伪静态没配，全部请求落进 `try_files ... /index.html`                                   | 按 10.1 补转发规则                                          |
-| `/robots.txt` 返回 HTML              | 静态回退把该路径也吞了                                                                 | 同上                                                        |
-| robots 正常但页面 500                | `SEO_FRONTEND_SHELL_URL` 指向了 Docker 服务名 `frontends:8081`，源码部署解析不了该主机 | 留空让代码自动判定，或显式填 `file://` 本机路径             |
-| 页面有内容但没有 canonical / JSON-LD | 该路径没在后端 `resolvePage()` 登记，返回的是 404 壳                                   | 补登记后重跑                                                |
-| 内容是最旧的                         | 前端重建后 shell 缓存未过期                                                            | 等 `SEO_SHELL_CACHE_TTL` 秒或清缓存                         |
-| 改了没生效                           | 改了仓库但没重新构建前端 / 没重载 Nginx                                                | 重新构建前端并重载 Nginx                                    |
-| 首页标题只有品牌名                   | 站点「浏览器标题」没填关键词                                                           | 后台「站点设置 → 浏览器标题」填带关键词的值，前后端同一口径 |
-
-> 域名走 CDN 时回源规则同样生效，但 CDN 可能缓存旧壳，必要时在 CDN 侧刷新缓存。
+> [!TIP] 注意
+> CDN 回源规则同样生效，但 CDN 可能缓存旧壳，必要时在 CDN 侧刷新缓存。
 
 ## 关联文档
 
