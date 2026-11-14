@@ -6,6 +6,7 @@ namespace Tests\Unit;
 
 use App\Services\Ticket\TicketUpstreamCallbackToken;
 use PHPUnit\Framework\TestCase;
+use InvalidArgumentException;
 
 final class TicketUpstreamCallbackTokenTest extends TestCase
 {
@@ -29,18 +30,19 @@ final class TicketUpstreamCallbackTokenTest extends TestCase
         ksort($expectedPayload, SORT_STRING);
         self::assertSame($signature, strtoupper(md5((string) json_encode($expectedPayload))));
     }
+
     public function test_rejects_weak_application_key(): void
     {
         foreach ([
             '',
             'change-me',
             'base64:unit-test-key',
-            'base64:'.base64_encode(str_repeat("\\0", 32)),
+            'base64:'.base64_encode(str_repeat(chr(0), 32)),
         ] as $invalidKey) {
             try {
                 TicketUpstreamCallbackToken::forServiceId(42, $invalidKey);
                 self::fail('弱 APP_KEY 必须被拒绝');
-            } catch (\\InvalidArgumentException $exception) {
+            } catch (InvalidArgumentException $exception) {
                 self::assertStringContainsString('密钥', $exception->getMessage());
             }
         }
