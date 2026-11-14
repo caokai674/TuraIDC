@@ -47,6 +47,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # UpstreamJwt intentionally rejects the all-zero placeholder key; use a fresh test key.
+      - name: Generate APP key for feature tests
+        run: echo "APP_KEY=base64:$(openssl rand -base64 32 | tr -d '\\n')" >> "$GITHUB_ENV"
+
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
