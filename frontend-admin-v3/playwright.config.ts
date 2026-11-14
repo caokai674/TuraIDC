@@ -36,11 +36,12 @@ export default defineConfig({
   },
   webServer: {
     // 不带 .env 文件也能启动：CI/干净 clone 下 .env.development 被 gitignore。
-    // 用 pnpm exec vite 直接传参（pnpm run 会把 --port 原样传递导致端口未生效）；
-    // 接口地址走 env 字段下发，避免 Windows cmd 不认 `VAR=x 命令` 前缀写法。
+    // 直接调 vite 的入口脚本，不走 `pnpm exec`：corepack 的 pnpm 版本一旦与
+    // package.json 的 packageManager 不一致（例如 corepack 自升级到 v12），
+    // webServer 会在启动阶段直接 BAD_PM_VERSION 挂掉，跟用例本身无关。
     command: PREVIEW_MODE
-      ? 'pnpm exec vite preview --host 127.0.0.1 --port 5176 --strictPort'
-      : 'pnpm exec vite --host 127.0.0.1 --mode development --port 5176 --strictPort',
+      ? 'node node_modules/vite/bin/vite.js preview --host 127.0.0.1 --port 5176 --strictPort'
+      : 'node node_modules/vite/bin/vite.js --host 127.0.0.1 --mode development --port 5176 --strictPort',
     env: {
       VITE_API_BASE_URL: 'http://127.0.0.1:8000/api',
       VITE_BASE_URL: '/',

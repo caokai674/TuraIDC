@@ -34,10 +34,13 @@ export default defineConfig({
     // 不用 pnpm run，直接 vite 传参，避免 --port 被吞掉。
     // PW_E2E_PREVIEW=1 时改跑构建产物：dev server 按需编译在并行 worker 下会互相
     // 抢编译，导致首屏断言随机超时（CI 门禁因此统一跑 preview，本地开发仍走 dev）。
+    // 直接调 vite 入口脚本，不走 `pnpm exec`：corepack 的 pnpm 版本一旦与
+    // packageManager 不一致（corepack 自升级到 v12 就是），webServer 会在启动阶段
+    // BAD_PM_VERSION 挂掉，跟用例无关。
     command:
       process.env.PW_E2E_PREVIEW === "1"
-        ? "pnpm exec vite preview --host 127.0.0.1 --port 5176 --strictPort"
-        : "pnpm exec vite --host 127.0.0.1 --mode development --port 5176 --strictPort",
+        ? "node node_modules/vite/bin/vite.js preview --host 127.0.0.1 --port 5176 --strictPort"
+        : "node node_modules/vite/bin/vite.js --host 127.0.0.1 --mode development --port 5176 --strictPort",
     env: {
       VITE_API_BASE_URL: "http://127.0.0.1:8000/api",
     },
