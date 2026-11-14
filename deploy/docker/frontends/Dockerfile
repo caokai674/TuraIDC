@@ -49,6 +49,8 @@ RUN corepack enable pnpm \
 COPY backend/scripts ./backend/scripts
 COPY theme.css tsconfig.base.json logo.png favicon.png ./
 COPY shared ./shared
+# @demo-fixtures 需要在构建时解析，保持与上游 main 的镜像上下文一致。
+COPY demo/fixtures ./demo/fixtures
 COPY frontend-admin-v3 ./frontend-admin-v3
 COPY frontend-user-v3-www ./frontend-user-v3-www
 COPY frontend-user-v4-console ./frontend-user-v4-console

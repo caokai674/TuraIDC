@@ -5,19 +5,26 @@ export default defineConfig({
   // 演示站冒烟单独一套配置（跑在构建产物上，需要 demo/dist），默认套件不掺进来
   testIgnore: ['**/demo/**'],
   outputDir: './test-results',
-  // 该套件共享一个 Vite 服务，测试之间保持串行，避免首屏模块编译竞争。
-  fullyParallel: false,
-  workers: 1,
+  // 并行跑：串行时 53 个用例要 2 分钟，并行后实测 55 秒，失败集合不变。
+  // 并行度可用 PLAYWRIGHT_WORKERS 覆盖，CI 上按 4 核给 4。
+  fullyParallel: true,
+  workers: Number(process.env.PLAYWRIGHT_WORKERS ?? (process.env.CI ? 4 : 8)),
   retries: process.env.CI ? 1 : 0,
   reporter: [['list'], ['html', { outputFolder: 'playwright-report', open: 'never' }]],
   use: {
     // 钉住语言：应用首屏按浏览器偏好自适应，而本套 spec 的断言写的是中文。
     // 不钉的话，宿主语言是英文时页面就渲染英文，整批用例会以「看起来像回归」的形式变红。
     locale: 'zh-CN',
+    // 本机没下载 Playwright 自带 chromium 时，可用 PW_E2E_CHANNEL=chrome 走系统 Chrome
+    channel: process.env.PW_E2E_CHANNEL || undefined,
     baseURL: 'http://127.0.0.1:5177',
-    trace: 'retain-on-failure',
+    // 预览（CI 门禁）模式只在失败重试时留 trace：常开 trace 会持续抓 DOM 快照，
+    // 重交互用例会被拖到超时；录像同理直接关掉。
+    trace: process.env.PW_E2E_PREVIEW === '1' ? 'on-first-retry' : 'retain-on-failure',
     screenshot: 'only-on-failure',
-    video: 'retain-on-failure',
+    // 预览（CI 门禁）模式关掉录像：每个 context 都录视频会把重交互用例拖到超时，
+    // 失败排查靠 trace + 截图已经够用。
+    video: process.env.PW_E2E_PREVIEW === '1' ? 'off' : 'retain-on-failure',
   },
   webServer: {
     // 不带 .env 文件也能启动：CI/干净 clone 下 .env.development 被 gitignore，
@@ -26,14 +33,19 @@ export default defineConfig({
     //
     // 接口地址必须走 Playwright 的 env 字段，不能用 `VAR=value 命令` 前缀 ——
     // 那是 Unix shell 写法，Windows 的 cmd 不认，webServer 会直接启动失败。
-    command: 'pnpm exec vite --host 127.0.0.1 --mode development --port 5177 --strictPort',
+    // PW_E2E_PREVIEW=1 时改跑构建产物：dev server 按需编译在并行 worker 下会互相
+    // 抢编译，导致首屏断言随机超时（CI 门禁因此统一跑 preview，本地开发仍走 dev）。
+    command:
+      process.env.PW_E2E_PREVIEW === '1'
+        ? 'pnpm exec vite preview --host 127.0.0.1 --port 5177 --strictPort'
+        : 'pnpm exec vite --host 127.0.0.1 --mode development --port 5177 --strictPort',
     env: {
       VITE_API_BASE_URL: 'http://127.0.0.1:8000/api',
       VITE_BASE_URL: '/',
     },
     url: 'http://127.0.0.1:5177',
     reuseExistingServer: false,
-    timeout: 120_000,
+    timeout: process.env.PW_E2E_PREVIEW === '1' ? 60_000 : 120_000,
   },
   projects: [
     {

@@ -342,6 +342,7 @@ const guideBlueprint: SidebarBlueprint = {
         "guide/configure/payment.md",
         "guide/configure/upstream.md",
         "guide/configure/rainyun-rcs.md",
+        "guide/configure/auto-refund.md",
       ],
     },
     {

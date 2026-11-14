@@ -15,6 +15,7 @@ Desktop.ini
 
 # ---- Node / 前端 ----
 node_modules/
+package-lock.json
 .pnp
 .pnp.js
 .yarn/*

@@ -13,9 +13,9 @@
   "hero": {
     "title": "TuraIDC",
     "titleTail": "业务/财务系统",
-    "description": "文档按读者身份分成两区：要部署并运营这套系统的站长进入使用者文档，要改代码、对接接口或参与维护的开发者进入开发者文档。",
-    "primary": { "text": "我是使用者 · 部署与运营", "href": "/guide/" },
-    "secondary": { "text": "我是开发者 · 开发与对接", "href": "/develop/" }
+    "description": "部署并运营该系统，请进入使用者文档；修改代码、对接接口或参与维护的开发者，请进入开发者文档。",
+    "primary": { "text": "我是使用者", "href": "/guide/" },
+    "secondary": { "text": "我是开发者", "href": "/develop/" }
   },
   "audiences": [
     {
@@ -123,21 +123,21 @@
     {
       "kicker": "通用",
       "title": "通用部署指南",
-      "description": "不绑定具体面板或容器：按环境要求手工完成后端、前端与进程守护的部署。",
+      "description": "适用于需手动执行部署的情况",
       "link": "/guide/deploy/generic",
       "action": "查看通用部署指南"
     },
     {
       "kicker": "面板部署",
       "title": "宝塔部署",
-      "description": "适用于使用宝塔面板管理 PHP、Nginx 与计划任务的服务器。",
+      "description": "适用于使用宝塔面板管理的服务器。",
       "link": "/guide/deploy/bt-panel",
       "action": "查看宝塔部署指南"
     },
     {
       "kicker": "裸机部署",
       "title": "裸机源码部署",
-      "description": "适用于不使用面板与容器、以 nginx + PHP-FPM + systemd + cron 原生服务运行的服务器。",
+      "description": "适用于不使用面板与容器，原生服务运行的服务器。",
       "link": "/guide/deploy/bare-metal",
       "action": "查看裸机源码部署指南"
     },
