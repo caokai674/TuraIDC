@@ -48,6 +48,16 @@ class ClientServiceConsoleAreaSecurityTest extends TestCase
     }
 
     #[Test]
+    public function sanitizer_never_reassembles_html_tags_inside_style_content(): void
+    {
+        // 删除 @import 后的危险文本可能形成 </style>，必须丢弃整个 style 块。
+        $output = $this->sanitize('<style>a{}<@import x;/style><img src=x onerror=1></style>');
+
+        $this->assertStringNotContainsStringIgnoringCase('<img', $output);
+        $this->assertStringNotContainsStringIgnoringCase('onerror', $output);
+    }
+
+    #[Test]
     public function panel_headers_disable_inline_eval_and_arbitrary_network_sources(): void
     {
         $controller = new ServiceConsoleAreaController(
