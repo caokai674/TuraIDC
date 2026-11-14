@@ -285,6 +285,9 @@ jobs:
         run: pnpm --filter turaidc-admin-v3 exec playwright install --with-deps chromium
 
       - name: Build ${{ matrix.app }}
+        env:
+          VITE_PUBLIC_SITE_URL: https://www.example.com
+          VITE_CONSOLE_SITE_URL: https://console.example.com
         run: pnpm --filter ${{ matrix.package }} build
 
       - name: Run ${{ matrix.app }} E2E

@@ -42,8 +42,10 @@ COPY frontend-user-v4-console/package.json ./frontend-user-v4-console/
 # 与 docs/guide/deploy/scheduling.md 记载的部署命令保持一致。
 # verify-deps-before-run=false：关闭 pnpm run 前的依赖检查，否则它会 purge 掉根 hoist 布局
 # （容器内无 TTY，purge 会直接以 ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY 中止构建）
-RUN corepack enable pnpm \
-  && pnpm install --frozen-lockfile --shamefully-hoist --config.verify-deps-before-run=false
+RUN corepack disable pnpm 2>/dev/null || true; \
+  npm install -g pnpm@11.13.1; \
+  pnpm --version; \
+  pnpm install --frozen-lockfile --shamefully-hoist --config.verify-deps-before-run=false
 
 # 源码（含仓库根公共文件：theme.css / tsconfig.base.json / logo / favicon）
 COPY backend/scripts ./backend/scripts
