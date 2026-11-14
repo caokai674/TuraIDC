@@ -17,6 +17,10 @@ return new class extends Migration
         Schema::create('zjmf_host_sync_events', function (Blueprint $table): void {
             $table->id();
             $table->unsignedBigInteger('service_id')->index();
+            $table->foreign('service_id', 'zjmf_host_sync_events_service_fk')
+                ->references('id')
+                ->on('services')
+                ->restrictOnDelete();
             $table->string('event_key', 64)->unique('zjmf_host_sync_events_event_key_unique');
             $table->string('signature_version', 16)->default('legacy');
             $table->string('nonce_hash', 64)->nullable();
