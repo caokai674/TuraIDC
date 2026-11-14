@@ -127,7 +127,7 @@ class PluginMarketService
             }
 
             $pluginRoot = $this->locatePluginRoot($extractDir, (string) (($entry['path'] ?? '') ?: ''));
-            $manifest = $this->readManifest($pluginRoot, $slug);
+            $manifest = $this->readManifest($pluginRoot, $slug, $entry === null);
             $destDir = $this->pluginDestination($manifest['domain'], $slug);
 
             if (is_dir($destDir) && ! $force) {
@@ -392,25 +392,29 @@ class PluginMarketService
     /**
      * @return array{domain: string, info: array<string, mixed>}
      */
-    private function readManifest(string $pluginRoot, string $slug): array
+    private function readManifest(string $pluginRoot, string $slug, bool $allowLocalPhp = false): array
     {
         $configPath = $pluginRoot.DIRECTORY_SEPARATOR.'config.php';
         $jsonPath = $pluginRoot.DIRECTORY_SEPARATOR.'plugin.json';
 
-        // 市场包来自远端，config.php 是可执行 PHP，不能在校验阶段 require。
-        // 同时存在 config.php 会让后续旧扫描链再次执行它，因此直接拒绝，
-        // 市场包必须使用纯数据的 plugin.json。
-        if (is_file($configPath)) {
+        // 远程索引包始终只接收纯数据 JSON；管理员通过 --zip 手动提供的本地包
+        // 属于显式可信输入，可兼容历史 config.php（本身是可执行代码）。
+        // 两者的信任边界由 install() 的 $entry 是否存在决定。
+        if (is_file($configPath) && ! $allowLocalPhp) {
             throw new BusinessException('插件市场包禁止使用可执行 config.php，请改用 plugin.json', 42200);
         }
-        if (! is_file($jsonPath)) {
-            throw new BusinessException('插件市场包缺少 plugin.json 纯数据清单', 42200);
-        }
+        if ($allowLocalPhp && is_file($configPath)) {
+            $manifest = require $configPath;
+        } else {
+            if (! is_file($jsonPath)) {
+                throw new BusinessException('插件市场包缺少 plugin.json 纯数据清单', 42200);
+            }
 
-        try {
-            $manifest = json_decode((string) file_get_contents($jsonPath), true, 512, JSON_THROW_ON_ERROR);
-        } catch (\Throwable) {
-            throw new BusinessException('插件市场包 plugin.json 格式非法', 42200);
+            try {
+                $manifest = json_decode((string) file_get_contents($jsonPath), true, 512, JSON_THROW_ON_ERROR);
+            } catch (\Throwable) {
+                throw new BusinessException('插件市场包 plugin.json 格式非法', 42200);
+            }
         }
 
         if (! is_array($manifest)) {

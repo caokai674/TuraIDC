@@ -22,9 +22,7 @@ class ServiceConsoleAreaController extends Controller
 {
     private const AREA_TICKET_COOKIE_PREFIX = 'tura_console_area_ticket_';
 
-    private const AREA_TICKET_COOKIE_SAME_SITE = 'lax';
-
-    public function __construct(
+      public function __construct(
         private readonly ClientServiceConsoleService $clientServiceConsoleService,
     ) {}
 
@@ -37,6 +35,16 @@ class ServiceConsoleAreaController extends Controller
 
     public function createTicket(Request $request, int $service)
     {
+        // 生产票据依赖 Secure Cookie；TLS 必须在受信反代上正确传递 scheme。
+        if (app()->environment('production') && ! $request->isSecure()) {
+            throw new BusinessException('生产控制台需要 HTTPS 才能签发面板票据', 40300, 403);
+        }
+
+        $sameSite = strtolower(trim((string) config('session.same_site', 'lax')));
+        if (! in_array($sameSite, ['lax', 'strict', 'none'], true)) {
+            $sameSite = 'lax';
+        }
+
         $payload = $this->clientServiceConsoleService->createConsoleAreaTicketForUser($request->user(), (int) $service);
         $ticket = trim((string) ($payload['ticket'] ?? ''));
 
@@ -49,7 +57,7 @@ class ServiceConsoleAreaController extends Controller
             $request->isSecure() || app()->environment('production'),
             true,
             true,
-            self::AREA_TICKET_COOKIE_SAME_SITE
+            $sameSite
         ));
     }
 
@@ -73,12 +81,18 @@ class ServiceConsoleAreaController extends Controller
                 'message' => SensitiveDataSanitizer::sanitizeText($exception->getMessage()),
             ]);
 
-            return response($this->errorPage($exception->getMessage()), 200, $this->panelResponseHeaders());
+            return response($this->errorPage('功能页加载失败，请刷新页面重试'), 502, $this->panelResponseHeaders());
         }
     }
 
     public function actions(Request $request, int $service)
     {
+        if (! $this->isActionOriginAllowed($request)) {
+            return response()->json(['status' => 403, 'msg' => '请求来源未通过验证', 'data' => []], 403, [
+                'Cache-Control' => 'private, no-store, max-age=0',
+            ]);
+        }
+
         $ticket = $this->ticketFromRequest($request, (int) $service);
         $data = $request->except(['ticket', '_token']);
 
@@ -222,6 +236,25 @@ class ServiceConsoleAreaController extends Controller
         }
 
         return trim((string) $request->cookie(self::ticketCookieName($service), ''));
+    }
+
+    /**
+     * 防止同站兄弟子域利用自动附带的面板 Cookie 跨源提交供应商动作。
+     * 无 Origin 时仅允许可信浏览器发送的 same-origin Fetch Metadata。
+     * 显式 Bearer 是可独立授权的非浏览器调用方式，不依赖 Cookie。
+     */
+    private function isActionOriginAllowed(Request $request): bool
+    {
+        if (trim((string) $request->bearerToken()) !== '') {
+            return true;
+        }
+
+        $origin = trim((string) $request->headers->get('Origin', ''));
+        if ($origin !== '') {
+            return hash_equals($request->getSchemeAndHttpHost(), $origin);
+        }
+
+        return strtolower(trim((string) $request->headers->get('Sec-Fetch-Site', ''))) === 'same-origin';
     }
 
     private function errorPage(string $message): string

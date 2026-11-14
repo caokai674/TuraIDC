@@ -134,6 +134,22 @@ class PluginMarketSupplyChainTest extends TestCase
         }
     }
 
+
+    public function test_manually_supplied_local_php_manifest_is_supported_only_when_explicitly_trusted(): void
+    {
+        $pluginRoot = $this->tmp.DIRECTORY_SEPARATOR.'trusted-manual-package';
+        File::ensureDirectoryExists($pluginRoot);
+        File::put($pluginRoot.DIRECTORY_SEPARATOR.'config.php', '<?php return ['.
+            "'info' => ['domain' => 'addons', 'slug' => 'manual_plugin']];");
+
+        $method = (new ReflectionClass(PluginMarketService::class))->getMethod('readManifest');
+        $method->setAccessible(true);
+        $manifest = $method->invoke(app(PluginMarketService::class), $pluginRoot, 'manual_plugin', true);
+
+        $this->assertSame('addons', $manifest['domain']);
+        $this->assertSame('manual_plugin', $manifest['info']['slug']);
+    }
+
     public function test_json_manifest_is_read_as_pure_data(): void
     {
         $pluginRoot = $this->tmp.DIRECTORY_SEPARATOR.'plugin';

@@ -60,6 +60,36 @@ class ServiceConsoleAreaTicketTransportTest extends TestCase
         $this->assertSame('/api/v2/client/services/3458/console-area', $path->invoke($controller, 3458));
     }
 
+
+    #[Test]
+    public function actions_require_same_origin_metadata_when_using_cookie(): void
+    {
+        $controller = (new ReflectionClass(ServiceConsoleAreaController::class))->newInstanceWithoutConstructor();
+        $method = new ReflectionMethod(ServiceConsoleAreaController::class, 'isActionOriginAllowed');
+        $method->setAccessible(true);
+
+        $sameOrigin = Request::create('https://api.example.com/api/v2/client/services/1/console-area/actions', 'POST', [], [], [], [
+            'HTTP_ORIGIN' => 'https://api.example.com',
+        ]);
+        $siblingOrigin = Request::create('https://api.example.com/api/v2/client/services/1/console-area/actions', 'POST', [], [], [], [
+            'HTTP_ORIGIN' => 'https://untrusted.example.com',
+            'HTTP_SEC_FETCH_SITE' => 'same-site',
+        ]);
+        $browserNoOrigin = Request::create('https://api.example.com/api/v2/client/services/1/console-area/actions', 'POST', [], [], [], [
+            'HTTP_SEC_FETCH_SITE' => 'same-origin',
+        ]);
+        $unknownOrigin = Request::create('https://api.example.com/api/v2/client/services/1/console-area/actions', 'POST');
+        $bearer = Request::create('https://api.example.com/api/v2/client/services/1/console-area/actions', 'POST', [], [], [], [
+            'HTTP_AUTHORIZATION' => 'Bearer valid-ticket',
+        ]);
+
+        $this->assertTrue($method->invoke($controller, $sameOrigin));
+        $this->assertFalse($method->invoke($controller, $siblingOrigin));
+        $this->assertTrue($method->invoke($controller, $browserNoOrigin));
+        $this->assertFalse($method->invoke($controller, $unknownOrigin));
+        $this->assertTrue($method->invoke($controller, $bearer));
+    }
+
     private function extractTicket(Request $request, int $service): string
     {
         $controller = (new ReflectionClass(ServiceConsoleAreaController::class))->newInstanceWithoutConstructor();
